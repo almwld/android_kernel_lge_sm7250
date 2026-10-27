@@ -46,7 +46,26 @@ jobs:
             https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh \
             -o /tmp/ksunext-setup.sh
           bash /tmp/ksunext-setup.sh legacy
-          test -d KernelSU || test -d KernelSU-Next || test -d drivers/kernelsu || true
+          # KernelSU-Next legacy currently treats every kernel below 5.0 as using
+          # a raw avtab pointer array. Linux 4.19 still uses struct flex_array,
+          # as confirmed by security/selinux/ss/avtab.h in this source tree.
+          # Keep raw-array access only for pre-4.10 kernels (e.g. 4.9).
+          KSU_SEPOLICY=drivers/kernelsu/selinux/sepolicy.c
+          test -f "$KSU_SEPOLICY"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("drivers/kernelsu/selinux/sepolicy.c")
+          s = p.read_text()
+          old = "#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)"
+          new = "#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)"
+          count = s.count(old)
+          if count < 3:
+              raise SystemExit(f"Expected at least 3 legacy avtab version guards, found {count}")
+          p.write_text(s.replace(old, new))
+          print(f"Adjusted {count} avtab guards for Linux 4.19 flex_array layout")
+          PY
+          grep -n -E 'KERNEL_VERSION\((4, 10|5, 0), 0\)' "$KSU_SEPOLICY" || true
+          test -d KernelSU || test -d KernelSU-Next || test -d drivers/kernelsu
           git status --short
 
       - name: Configure LG Wing kernel
