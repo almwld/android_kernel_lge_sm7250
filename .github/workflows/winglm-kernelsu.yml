@@ -57,14 +57,194 @@ jobs:
           mkdir -p out
           make O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- vendor/winglm-perf_defconfig
           if [ -x scripts/config ]; then
-            scripts/config --file out/.config --enable KSU
+            CONFIG_TOOL=scripts/config
           else
-            ./scripts/config --file out/.config --enable KSU
+            CONFIG_TOOL=./scripts/config
           fi
+          # Linux 4.19 is below the supported range for KSU's tracepoint+kretprobe
+          # mode. Select its syscall-table hook mode instead of manual hooks.
+          "$CONFIG_TOOL" --file out/.config --enable KPROBES
+          "$CONFIG_TOOL" --file out/.config --enable KSU
+          "$CONFIG_TOOL" --file out/.config --disable KSU_MANUAL_HOOK
+          "$CONFIG_TOOL" --file out/.config --disable KSU_KPROBES_HOOK
+          "$CONFIG_TOOL" --file out/.config --enable KSU_SYSCALL_TABLE_HOOK
           make O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-          grep -E '^(CONFIG_MACH_LITO_WINGLM=y|CONFIG_MACH_LITO_WINGLM_LAO_COM=y|CONFIG_KSU=y|CONFIG_LOCALVERSION="-perf")' out/.config || true
-          grep -q '^CONFIG_KSU=y$' out/.config
-          grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
+          grep -E '^(CONFIG_MACH_LITO_WINGLM=y|CONFIG_MACH_LITO_WINGLM_LAO_COM=y|CONFIG_KSU=y|CONFIG_KPROBES=y|CONFIG_KSU_SYSCALL_TABLE_HOOK=y|CONFIG_LOCALVERSION="-perf")' out/.config || true
+          grep -q '^CONFIG_KSU=y
+
+      - name: Build kernel and device trees
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz dtbs 2>&1 | tee build.log
+
+      - name: Verify outputs and collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp build.log artifacts/ 2>/dev/null || true
+          cp out/.config artifacts/kernel.config 2>/dev/null || true
+          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
+          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
+            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
+            echo "Kernel image and CONFIG_KSU=y verified."
+          else
+            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
+            exit 1
+          fi
+
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+ out/.config
+          grep -q '^CONFIG_KPROBES=y
+
+      - name: Build kernel and device trees
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz dtbs 2>&1 | tee build.log
+
+      - name: Verify outputs and collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp build.log artifacts/ 2>/dev/null || true
+          cp out/.config artifacts/kernel.config 2>/dev/null || true
+          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
+          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
+            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
+            echo "Kernel image and CONFIG_KSU=y verified."
+          else
+            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
+            exit 1
+          fi
+
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+ out/.config
+          grep -q '^CONFIG_KSU_SYSCALL_TABLE_HOOK=y
+
+      - name: Build kernel and device trees
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz dtbs 2>&1 | tee build.log
+
+      - name: Verify outputs and collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp build.log artifacts/ 2>/dev/null || true
+          cp out/.config artifacts/kernel.config 2>/dev/null || true
+          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
+          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
+            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
+            echo "Kernel image and CONFIG_KSU=y verified."
+          else
+            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
+            exit 1
+          fi
+
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+ out/.config
+          ! grep -q '^CONFIG_KSU_MANUAL_HOOK=y
+
+      - name: Build kernel and device trees
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz dtbs 2>&1 | tee build.log
+
+      - name: Verify outputs and collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp build.log artifacts/ 2>/dev/null || true
+          cp out/.config artifacts/kernel.config 2>/dev/null || true
+          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
+          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
+            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
+            echo "Kernel image and CONFIG_KSU=y verified."
+          else
+            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
+            exit 1
+          fi
+
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+ out/.config
+          grep -q '^CONFIG_MACH_LITO_WINGLM=y
+
+      - name: Build kernel and device trees
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz dtbs 2>&1 | tee build.log
+
+      - name: Verify outputs and collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp build.log artifacts/ 2>/dev/null || true
+          cp out/.config artifacts/kernel.config 2>/dev/null || true
+          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
+          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
+            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
+            echo "Kernel image and CONFIG_KSU=y verified."
+          else
+            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
+            exit 1
+          fi
+
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+ out/.config
 
       - name: Build kernel and device trees
         shell: bash
