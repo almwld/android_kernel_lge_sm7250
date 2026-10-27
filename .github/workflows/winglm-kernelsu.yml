@@ -64,6 +64,77 @@ jobs:
           p.write_text(s.replace(old, new))
           print(f"Adjusted {count} avtab guards for Linux 4.19 flex_array layout")
           PY
+          # Backport path_umount() and use the nofault writer already provided by this LG tree.
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          patch_memory = Path("drivers/kernelsu/hook/patch_memory.c")
+          if patch_memory.exists():
+              s = patch_memory.read_text()
+              pattern = r"// copy_to_kernel_nofault\\(\\).*?^#endif\\s*\\n"
+              updated, count = re.subn(
+                  pattern,
+                  "/* LG's Linux 4.19 tree already provides copy_to_kernel_nofault(). */\\n",
+                  s, count=1, flags=re.M | re.S)
+              if count != 1:
+                  raise SystemExit("Could not locate probe_kernel_write compatibility block")
+              patch_memory.write_text(updated)
+
+          namespace = Path("fs/namespace.c")
+          s = namespace.read_text()
+          marker = "SYSCALL_DEFINE2(umount"
+          if "int path_umount(struct path *path, int flags)" not in s:
+              pos = s.find(marker)
+              if pos < 0:
+                  raise SystemExit("Could not locate umount syscall insertion point")
+              helper = """/*
+           * path_umount() compatibility backport for KernelSU on Linux 4.19.
+           * Caller passes a referenced path and validates the flags.
+           */
+          static int ksu_can_umount_path(const struct path *path, int flags)
+          {
+              struct mount *mnt = real_mount(path->mnt);
+
+              if (!may_mount())
+                  return -EPERM;
+              if (path->dentry != path->mnt->mnt_root)
+                  return -EINVAL;
+              if (!check_mnt(mnt))
+                  return -EINVAL;
+              if (mnt->mnt.mnt_flags & MNT_LOCKED)
+                  return -EINVAL;
+              if ((flags & MNT_FORCE) && !capable(CAP_SYS_ADMIN))
+                  return -EPERM;
+              return 0;
+          }
+
+          int path_umount(struct path *path, int flags)
+          {
+              struct mount *mnt = real_mount(path->mnt);
+              int ret = ksu_can_umount_path(path, flags);
+
+              if (!ret)
+                  ret = do_umount(mnt, flags);
+
+              /* Do not use path_put(): it clears mnt_expiry_mark. */
+              dput(path->dentry);
+              mntput_no_expire(mnt);
+              return ret;
+          }
+
+          """
+              namespace.write_text(s[:pos] + helper + s[pos:])
+
+          internal = Path("fs/internal.h")
+          s = internal.read_text()
+          proto = "extern int path_umount(struct path *path, int flags);"
+          if proto not in s:
+              marker = "extern int finish_automount(struct vfsmount *, struct path *);"
+              if marker not in s:
+                  raise SystemExit("Could not locate fs/internal.h namespace declarations")
+              internal.write_text(s.replace(marker, marker + "\\n" + proto, 1))
+          PY
           grep -n -E 'KERNEL_VERSION\((4, 10|5, 0), 0\)' "$KSU_SEPOLICY" || true
           test -d KernelSU || test -d KernelSU-Next || test -d drivers/kernelsu
           git status --short
@@ -80,7 +151,10 @@ jobs:
           else
             CONFIG_TOOL=./scripts/config
           fi
-          # Linux 4.19 uses syscall-table hooks; KSU kprobe hooks target newer kernels.
+          # Provide the tracepoint definitions declared by this tree's Android hook headers.
+          "$CONFIG_TOOL" --file out/.config --enable ANDROID
+          "$CONFIG_TOOL" --file out/.config --enable ANDROID_VENDOR_HOOKS
+          # Keep the existing syscall-table hook mode while validating compatibility.
           "$CONFIG_TOOL" --file out/.config --enable KPROBES
           "$CONFIG_TOOL" --file out/.config --enable KSU
           "$CONFIG_TOOL" --file out/.config --disable KSU_MANUAL_HOOK
@@ -89,8 +163,120 @@ jobs:
           make O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           grep -q '^CONFIG_KSU=y$' out/.config
           grep -q '^CONFIG_KPROBES=y$' out/.config
-          grep -q '^CONFIG_KSU_SYSCALL_TABLE_HOOK=y$' out/.config
-          ! grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' out/.config
+          grep -q '^CONFIG_KSU_SYSCALL_TABLE_HOOK=y
+          grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
+
+      - name: Build kernel and device trees
+        shell: bash
+        run: |
+          set -o pipefail
+          # Build the kernel image independently first. The generic dtbs target currently
+          # pulls unrelated Lito reference boards whose labels are absent in this tree.
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz 2>&1 | tee build.log
+
+      - name: Verify outputs and collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp build.log artifacts/ 2>/dev/null || true
+          cp out/.config artifacts/kernel.config 2>/dev/null || true
+          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
+          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
+            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
+            echo "Kernel image and CONFIG_KSU=y verified."
+          else
+            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
+            exit 1
+          fi
+
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+ out/.config
+          grep -q '^CONFIG_ANDROID_VENDOR_HOOKS=y
+          grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
+
+      - name: Build kernel and device trees
+        shell: bash
+        run: |
+          set -o pipefail
+          # Build the kernel image independently first. The generic dtbs target currently
+          # pulls unrelated Lito reference boards whose labels are absent in this tree.
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz 2>&1 | tee build.log
+
+      - name: Verify outputs and collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp build.log artifacts/ 2>/dev/null || true
+          cp out/.config artifacts/kernel.config 2>/dev/null || true
+          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
+          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
+            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
+            echo "Kernel image and CONFIG_KSU=y verified."
+          else
+            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
+            exit 1
+          fi
+
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+ out/.config
+          ! grep -q '^CONFIG_KSU_MANUAL_HOOK=y
+          grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
+
+      - name: Build kernel and device trees
+        shell: bash
+        run: |
+          set -o pipefail
+          # Build the kernel image independently first. The generic dtbs target currently
+          # pulls unrelated Lito reference boards whose labels are absent in this tree.
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz 2>&1 | tee build.log
+
+      - name: Verify outputs and collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp build.log artifacts/ 2>/dev/null || true
+          cp out/.config artifacts/kernel.config 2>/dev/null || true
+          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
+          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
+            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
+            echo "Kernel image and CONFIG_KSU=y verified."
+          else
+            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
+            exit 1
+          fi
+
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+ out/.config
           grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
 
       - name: Build kernel and device trees
