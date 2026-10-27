@@ -46,10 +46,6 @@ jobs:
             https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh \
             -o /tmp/ksunext-setup.sh
           bash /tmp/ksunext-setup.sh legacy
-          # KernelSU-Next legacy currently treats every kernel below 5.0 as using
-          # a raw avtab pointer array. Linux 4.19 still uses struct flex_array,
-          # as confirmed by security/selinux/ss/avtab.h in this source tree.
-          # Keep raw-array access only for pre-4.10 kernels (e.g. 4.9).
           KSU_SEPOLICY=drivers/kernelsu/selinux/sepolicy.c
           test -f "$KSU_SEPOLICY"
           python3 - <<'PY'
@@ -60,7 +56,7 @@ jobs:
           new = "#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)"
           count = s.count(old)
           if count < 3:
-              raise SystemExit(f"Expected at least 3 legacy avtab version guards, found {count}")
+              raise SystemExit(f"Expected at least 3 legacy avtab guards, found {count}")
           p.write_text(s.replace(old, new))
           print(f"Adjusted {count} avtab guards for Linux 4.19 flex_array layout")
           PY
@@ -76,15 +72,10 @@ jobs:
           test -f arch/arm64/configs/vendor/winglm-perf_defconfig
           mkdir -p out
           make O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- vendor/winglm-perf_defconfig
-          if [ -x scripts/config ]; then
-            CONFIG_TOOL=scripts/config
-          else
-            CONFIG_TOOL=./scripts/config
-          fi
-          # Provide the tracepoint definitions declared by this tree's Android hook headers.
+          CONFIG_TOOL=scripts/config
+          test -x "$CONFIG_TOOL"
           "$CONFIG_TOOL" --file out/.config --enable ANDROID
           "$CONFIG_TOOL" --file out/.config --enable ANDROID_VENDOR_HOOKS
-          # Keep the existing syscall-table hook mode while validating compatibility.
           "$CONFIG_TOOL" --file out/.config --enable KPROBES
           "$CONFIG_TOOL" --file out/.config --enable KSU
           "$CONFIG_TOOL" --file out/.config --disable KSU_MANUAL_HOOK
@@ -93,128 +84,15 @@ jobs:
           make O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           grep -q '^CONFIG_KSU=y$' out/.config
           grep -q '^CONFIG_KPROBES=y$' out/.config
-          grep -q '^CONFIG_KSU_SYSCALL_TABLE_HOOK=y
+          grep -q '^CONFIG_KSU_SYSCALL_TABLE_HOOK=y$' out/.config
+          grep -q '^CONFIG_ANDROID_VENDOR_HOOKS=y$' out/.config
+          ! grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' out/.config
           grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
 
       - name: Build kernel and device trees
         shell: bash
         run: |
           set -o pipefail
-          # Build the kernel image independently first. The generic dtbs target currently
-          # pulls unrelated Lito reference boards whose labels are absent in this tree.
-          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz 2>&1 | tee build.log
-
-      - name: Verify outputs and collect diagnostics
-        if: always()
-        shell: bash
-        run: |
-          mkdir -p artifacts
-          cp build.log artifacts/ 2>/dev/null || true
-          cp out/.config artifacts/kernel.config 2>/dev/null || true
-          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
-          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
-          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
-          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
-            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
-            echo "Kernel image and CONFIG_KSU=y verified."
-          else
-            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
-            exit 1
-          fi
-
-      - name: Upload kernel build artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: winglm-kernelsu-next-${{ github.run_number }}
-          path: artifacts/
-          if-no-files-found: warn
-          retention-days: 14
- out/.config
-          grep -q '^CONFIG_ANDROID_VENDOR_HOOKS=y
-          grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
-
-      - name: Build kernel and device trees
-        shell: bash
-        run: |
-          set -o pipefail
-          # Build the kernel image independently first. The generic dtbs target currently
-          # pulls unrelated Lito reference boards whose labels are absent in this tree.
-          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz 2>&1 | tee build.log
-
-      - name: Verify outputs and collect diagnostics
-        if: always()
-        shell: bash
-        run: |
-          mkdir -p artifacts
-          cp build.log artifacts/ 2>/dev/null || true
-          cp out/.config artifacts/kernel.config 2>/dev/null || true
-          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
-          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
-          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
-          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
-            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
-            echo "Kernel image and CONFIG_KSU=y verified."
-          else
-            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
-            exit 1
-          fi
-
-      - name: Upload kernel build artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: winglm-kernelsu-next-${{ github.run_number }}
-          path: artifacts/
-          if-no-files-found: warn
-          retention-days: 14
- out/.config
-          ! grep -q '^CONFIG_KSU_MANUAL_HOOK=y
-          grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
-
-      - name: Build kernel and device trees
-        shell: bash
-        run: |
-          set -o pipefail
-          # Build the kernel image independently first. The generic dtbs target currently
-          # pulls unrelated Lito reference boards whose labels are absent in this tree.
-          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz 2>&1 | tee build.log
-
-      - name: Verify outputs and collect diagnostics
-        if: always()
-        shell: bash
-        run: |
-          mkdir -p artifacts
-          cp build.log artifacts/ 2>/dev/null || true
-          cp out/.config artifacts/kernel.config 2>/dev/null || true
-          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
-          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
-          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
-          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
-            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
-            echo "Kernel image and CONFIG_KSU=y verified."
-          else
-            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
-            exit 1
-          fi
-
-      - name: Upload kernel build artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: winglm-kernelsu-next-${{ github.run_number }}
-          path: artifacts/
-          if-no-files-found: warn
-          retention-days: 14
- out/.config
-          grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
-
-      - name: Build kernel and device trees
-        shell: bash
-        run: |
-          set -o pipefail
-          # Build the kernel image independently first. The generic dtbs target currently
-          # pulls unrelated Lito reference boards whose labels are absent in this tree.
           make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz 2>&1 | tee build.log
 
       - name: Verify outputs and collect diagnostics
