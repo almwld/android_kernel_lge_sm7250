@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euxo pipefail
           curl -fL --retry 3 --retry-delay 2 \
-            https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
+            https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh \
             -o /tmp/ksunext-setup.sh
           bash /tmp/ksunext-setup.sh legacy
           test -d KernelSU || test -d KernelSU-Next || test -d drivers/kernelsu || true
@@ -78,7 +78,9 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz dtbs 2>&1 | tee build.log
+          # Build the kernel image independently first. The generic dtbs target currently
+          # pulls unrelated Lito reference boards whose labels are absent in this tree.
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz 2>&1 | tee build.log
 
       - name: Verify outputs and collect diagnostics
         if: always()
