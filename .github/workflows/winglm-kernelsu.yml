@@ -72,10 +72,10 @@ jobs:
           patch_memory = Path("drivers/kernelsu/hook/patch_memory.c")
           if patch_memory.exists():
               s = patch_memory.read_text()
-              pattern = r"// copy_to_kernel_nofault\\(\\).*?^#endif\\s*\\n"
+              pattern = r"// copy_to_kernel_nofault.*?^#endif\s*\n"
               updated, count = re.subn(
                   pattern,
-                  "/* LG's Linux 4.19 tree already provides copy_to_kernel_nofault(). */\\n",
+                  "/* LG's Linux 4.19 tree already provides copy_to_kernel_nofault(). */\n",
                   s, count=1, flags=re.M | re.S)
               if count != 1:
                   raise SystemExit("Could not locate probe_kernel_write compatibility block")
@@ -133,7 +133,7 @@ jobs:
               marker = "extern int finish_automount(struct vfsmount *, struct path *);"
               if marker not in s:
                   raise SystemExit("Could not locate fs/internal.h namespace declarations")
-              internal.write_text(s.replace(marker, marker + "\\n" + proto, 1))
+              internal.write_text(s.replace(marker, marker + "\n" + proto, 1))
           PY
           grep -n -E 'KERNEL_VERSION\((4, 10|5, 0), 0\)' "$KSU_SEPOLICY" || true
           test -d KernelSU || test -d KernelSU-Next || test -d drivers/kernelsu
