@@ -60,7 +60,10 @@ jobs:
           p.write_text(s.replace(old, new))
           print(f"Adjusted {count} avtab guards for Linux 4.19 flex_array layout")
           PY
-          python3 scripts/ci/patch-kernelsu-legacy.py
+          curl -fL --retry 3 --retry-delay 2 \
+            https://raw.githubusercontent.com/almwld/android_kernel_lge_sm7250/ksunext-winglm-ci/scripts/ci/patch-kernelsu-legacy.py \
+            -o /tmp/patch-kernelsu-legacy.py
+          python3 /tmp/patch-kernelsu-legacy.py
           grep -n -E 'KERNEL_VERSION\((4, 10|5, 0), 0\)' "$KSU_SEPOLICY" || true
           test -d KernelSU || test -d KernelSU-Next || test -d drivers/kernelsu
           git status --short
