@@ -70,7 +70,11 @@ jobs:
           "$CONFIG_TOOL" --file out/.config --enable KSU_SYSCALL_TABLE_HOOK
           make O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           grep -E '^(CONFIG_MACH_LITO_WINGLM=y|CONFIG_MACH_LITO_WINGLM_LAO_COM=y|CONFIG_KSU=y|CONFIG_KPROBES=y|CONFIG_KSU_SYSCALL_TABLE_HOOK=y|CONFIG_LOCALVERSION="-perf")' out/.config || true
-          grep -q '^CONFIG_KSU=y
+          grep -q '^CONFIG_KSU=y$' out/.config
+          grep -q '^CONFIG_KPROBES=y$' out/.config
+          grep -q '^CONFIG_KSU_SYSCALL_TABLE_HOOK=y$' out/.config
+          ! grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' out/.config
+          grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
 
       - name: Build kernel and device trees
         shell: bash
