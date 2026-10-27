@@ -1,0 +1,100 @@
+name: LG Wing KernelSU-Next Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Kernel source ref to build"
+        required: true
+        default: "f16d8d7345901bb1933f25acedeb60c07cf0d2bb"
+  push:
+    branches:
+      - ksunext-winglm-ci
+    paths:
+      - ".github/workflows/winglm-kernelsu.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: winglm-kernelsu-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || 'f16d8d7345901bb1933f25acedeb60c07cf0d2bb' }}
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential flex git libelf-dev libssl-dev lld llvm clang gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu python3 python-is-python3 cpio rsync pahole
+          clang --version
+          ld.lld --version
+
+      - name: Integrate KernelSU-Next legacy mode
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -fL --retry 3 --retry-delay 2 \
+            https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
+            -o /tmp/ksunext-setup.sh
+          bash /tmp/ksunext-setup.sh legacy
+          test -d KernelSU || test -d KernelSU-Next || test -d drivers/kernelsu || true
+          git status --short
+
+      - name: Configure LG Wing kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f arch/arm64/configs/vendor/winglm-perf_defconfig
+          mkdir -p out
+          make O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- vendor/winglm-perf_defconfig
+          if [ -x scripts/config ]; then
+            scripts/config --file out/.config --enable KSU
+          else
+            ./scripts/config --file out/.config --enable KSU
+          fi
+          make O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          grep -E '^(CONFIG_MACH_LITO_WINGLM=y|CONFIG_MACH_LITO_WINGLM_LAO_COM=y|CONFIG_KSU=y|CONFIG_LOCALVERSION="-perf")' out/.config || true
+          grep -q '^CONFIG_KSU=y$' out/.config
+          grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
+
+      - name: Build kernel and device trees
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz dtbs 2>&1 | tee build.log
+
+      - name: Verify outputs and collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp build.log artifacts/ 2>/dev/null || true
+          cp out/.config artifacts/kernel.config 2>/dev/null || true
+          cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
+          cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
+          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
+            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
+            echo "Kernel image and CONFIG_KSU=y verified."
+          else
+            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
+            exit 1
+          fi
+
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
