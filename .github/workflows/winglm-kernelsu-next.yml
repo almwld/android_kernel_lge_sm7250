@@ -1,0 +1,100 @@
+name: Build LG Wing KernelSU-Next
+
+on:
+  push:
+    branches: [lineage-23.2]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: winglm-kernelsu-next-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ARM64 kernel + KernelSU-Next (LG Wing)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout pinned LG Wing kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: almwld/android_kernel_lge_sm7250
+          ref: f16d8d7345901bb1933f25acedeb60c07cf0d2bb
+          fetch-depth: 1
+          path: kernel
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential cpio flex git libelf-dev libssl-dev \
+            python3 rsync pahole clang-18 lld-18 llvm-18 \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          clang-18 --version
+          ld.lld-18 --version
+
+      - name: Integrate KernelSU-Next legacy
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -fL --retry 3 --retry-delay 2 \
+            https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh \
+            -o /tmp/ksu-setup.sh
+          bash /tmp/ksu-setup.sh 165b87fa99abfe78058c4dc9df43c432e86b8011
+          test -L drivers/kernelsu
+          grep -q 'CONFIG_KSU' drivers/kernelsu/Kconfig
+
+      - name: Configure LG Wing perf defconfig and enable KSU
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          make O=out ARCH=arm64 LLVM=-18 CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- vendor/winglm-perf_defconfig
+          scripts/config --file out/.config -e KSU
+          make O=out ARCH=arm64 LLVM=-18 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- olddefconfig
+          grep -E '^(CONFIG_MACH_LITO_WINGLM|CONFIG_KSU)=' out/.config
+          grep -qx 'CONFIG_KSU=y' out/.config
+          grep -qx 'CONFIG_MACH_LITO_WINGLM=y' out/.config
+
+      - name: Build kernel image and device trees
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" O=out ARCH=arm64 LLVM=-18 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            Image dtbs 2>&1 | tee build.log
+
+      - name: Verify output and KernelSU markers
+        working-directory: kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -s out/arch/arm64/boot/Image
+          grep -qx 'CONFIG_KSU=y' out/.config
+          file out/arch/arm64/boot/Image
+          sha256sum out/arch/arm64/boot/Image | tee image.sha256
+          strings out/arch/arm64/boot/Image | grep -Ei 'KernelSU|kernelsu' | head -n 30 || true
+          mkdir -p artifact/winglm-kernelsu-next
+          cp out/arch/arm64/boot/Image artifact/winglm-kernelsu-next/winglm-kernel-Image
+          cp out/.config artifact/winglm-kernelsu-next/kernel.config
+          cp image.sha256 artifact/winglm-kernelsu-next/
+          cp build.log artifact/winglm-kernelsu-next/ 2>/dev/null || true
+          printf 'Source commit: f16d8d7345901bb1933f25acedeb60c07cf0d2bb\nKernelSU-Next legacy commit: 165b87fa99abfe78058c4dc9df43c432e86b8011\nDefconfig: vendor/winglm-perf_defconfig\n' > artifact/winglm-kernelsu-next/BUILD-INFO.txt
+          tar -czf winglm-kernelsu-next-artifact.tar.gz -C artifact winglm-kernelsu-next
+
+      - name: Upload kernel build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: |
+            kernel/winglm-kernelsu-next-artifact.tar.gz
+            kernel/build.log
+          if-no-files-found: error
+          retention-days: 14
