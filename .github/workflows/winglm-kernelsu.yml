@@ -110,7 +110,7 @@ jobs:
           else
             echo "Device-tree output directory was not created." | tee -a artifacts/build.log
           fi
-          DT_COUNT=$(find out/arch/arm64/boot/dts -type f \\( -name '*.dtb' -o -name '*.dtbo' \\) 2>/dev/null | wc -l)
+          DT_COUNT=$(find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) 2>/dev/null | wc -l)
           echo "Device-tree outputs found: $DT_COUNT" | tee -a artifacts/build.log
           if [ "$DT_COUNT" -lt 1 ]; then
             echo "No DTB/DTBO outputs were produced; refusing to mark this device build ready." >&2
