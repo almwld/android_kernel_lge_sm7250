@@ -94,7 +94,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz 2>&1 | tee build.log
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz dtbs 2>&1 | tee build.log
 
       - name: Verify outputs and collect diagnostics
         if: always()
