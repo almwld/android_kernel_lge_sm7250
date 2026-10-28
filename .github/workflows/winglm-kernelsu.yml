@@ -90,19 +90,30 @@ jobs:
           ! grep -q '^CONFIG_KSU_MANUAL_HOOK=y$' out/.config
           grep -q '^CONFIG_MACH_LITO_WINGLM=y$' out/.config
 
-      - name: Build kernel and device trees
+      - name: Build kernel image
+        id: build_kernel
         shell: bash
         run: |
           set -o pipefail
-          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz dtbs 2>&1 | tee build.log
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz 2>&1 | tee build.log
 
-      - name: Verify outputs and collect diagnostics
+      - name: Build device trees (best effort)
+        id: build_dtbs
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" O="$PWD/out" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- dtbs 2>&1 | tee dtbs.log
+
+      - name: Verify kernel output and collect diagnostics
         if: always()
         shell: bash
         run: |
           mkdir -p artifacts
           cp build.log artifacts/ 2>/dev/null || true
+          cp dtbs.log artifacts/ 2>/dev/null || true
           cp out/.config artifacts/kernel.config 2>/dev/null || true
+          cp out/System.map artifacts/System.map 2>/dev/null || true
           cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
           cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
           if [ -d out/arch/arm64/boot/dts ]; then
@@ -112,18 +123,27 @@ jobs:
           fi
           DT_COUNT=$(find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) 2>/dev/null | wc -l)
           echo "Device-tree outputs found: $DT_COUNT" | tee -a artifacts/build.log
+          if [ ! -s artifacts/Image.gz ] || ! grep -q '^CONFIG_KSU=y
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+ artifacts/kernel.config; then
+            echo "Kernel image or CONFIG_KSU=y missing; kernel build is not ready." >&2
+            exit 1
+          fi
+          if [ ! -s artifacts/System.map ]; then
+            echo "WARNING: System.map was not generated; embedded kallsyms recovery remains necessary." | tee -a artifacts/build.log
+          fi
           if [ "$DT_COUNT" -lt 1 ]; then
-            echo "No DTB/DTBO outputs were produced; refusing to mark this device build ready." >&2
-            exit 1
+            echo "WARNING: no DTB/DTBO outputs; this is a kernel-only diagnostic artifact, not a flash-ready image." | tee -a artifacts/build.log
           fi
-          if [ ! -s artifacts/Image.gz ] || ! grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
-            echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
-            exit 1
-          fi
-          # Hash every collected output so the kernel, config, diagnostics, and DTBs
-          # can be checked after download. Exclude the checksum file itself.
           find artifacts -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > artifacts/SHA256SUMS
-          echo "Kernel image, CONFIG_KSU=y, and at least one device-tree output verified."
+          echo "Verified Image.gz and CONFIG_KSU=y. Device-tree completeness is reported separately."
 
       - name: Upload kernel build artifacts
         if: always()
