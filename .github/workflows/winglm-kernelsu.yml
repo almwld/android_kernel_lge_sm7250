@@ -123,16 +123,7 @@ jobs:
           fi
           DT_COUNT=$(find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) 2>/dev/null | wc -l)
           echo "Device-tree outputs found: $DT_COUNT" | tee -a artifacts/build.log
-          if [ ! -s artifacts/Image.gz ] || ! grep -q '^CONFIG_KSU=y
-      - name: Upload kernel build artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: winglm-kernelsu-next-${{ github.run_number }}
-          path: artifacts/
-          if-no-files-found: warn
-          retention-days: 14
- artifacts/kernel.config; then
+          if [ ! -s artifacts/Image.gz ] || ! grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
             echo "Kernel image or CONFIG_KSU=y missing; kernel build is not ready." >&2
             exit 1
           fi
