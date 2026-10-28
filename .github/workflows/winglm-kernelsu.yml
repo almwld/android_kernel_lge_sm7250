@@ -112,13 +112,28 @@ jobs:
           fi
           DT_COUNT=$(find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) 2>/dev/null | wc -l)
           echo "Device-tree outputs found: $DT_COUNT" | tee -a artifacts/build.log
-          if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
-            sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
-            echo "Kernel image and CONFIG_KSU=y verified."
-          else
+          if [ "$DT_COUNT" -lt 1 ]; then
+            echo "No DTB/DTBO outputs were produced; refusing to mark this device build ready." >&2
+            exit 1
+          fi
+          if [ ! -s artifacts/Image.gz ] || ! grep -q '^CONFIG_KSU=y
+
+      - name: Upload kernel build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winglm-kernelsu-next-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+ artifacts/kernel.config; then
             echo "Kernel image or CONFIG_KSU=y missing; build is not ready." >&2
             exit 1
           fi
+          # Hash every collected output so the kernel, config, diagnostics, and DTBs
+          # can be checked after download. Exclude the checksum file itself.
+          find artifacts -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > artifacts/SHA256SUMS
+          echo "Kernel image, CONFIG_KSU=y, and at least one device-tree output verified."
 
       - name: Upload kernel build artifacts
         if: always()
