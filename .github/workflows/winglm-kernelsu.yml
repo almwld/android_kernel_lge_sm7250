@@ -6,12 +6,10 @@ on:
       source_ref:
         description: "Kernel source ref to build"
         required: true
-        default: "f16d8d7345901bb1933f25acedeb60c07cf0d2bb"
+        default: "ksunext-winglm-ci"
   push:
     branches:
       - ksunext-winglm-ci
-    paths:
-      - ".github/workflows/winglm-kernelsu.yml"
 
 permissions:
   contents: read
@@ -28,7 +26,7 @@ jobs:
       - name: Checkout kernel source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || 'f16d8d7345901bb1933f25acedeb60c07cf0d2bb' }}
+          ref: ${{ inputs.source_ref || 'ksunext-winglm-ci' }}
           fetch-depth: 1
 
       - name: Install build dependencies
