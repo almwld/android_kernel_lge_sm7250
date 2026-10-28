@@ -105,7 +105,13 @@ jobs:
           cp out/.config artifacts/kernel.config 2>/dev/null || true
           cp out/arch/arm64/boot/Image artifacts/Image 2>/dev/null || true
           cp out/arch/arm64/boot/Image.gz artifacts/Image.gz 2>/dev/null || true
-          find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          if [ -d out/arch/arm64/boot/dts ]; then
+            find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          else
+            echo "Device-tree output directory was not created." | tee -a artifacts/build.log
+          fi
+          DT_COUNT=$(find out/arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtbo' \) 2>/dev/null | wc -l)
+          echo "Device-tree outputs found: $DT_COUNT" | tee -a artifacts/build.log
           if [ -s artifacts/Image.gz ] && grep -q '^CONFIG_KSU=y$' artifacts/kernel.config; then
             sha256sum artifacts/Image.gz > artifacts/SHA256SUMS
             echo "Kernel image and CONFIG_KSU=y verified."
