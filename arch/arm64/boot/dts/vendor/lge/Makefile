@@ -29,7 +29,7 @@ ifeq ($(CONFIG_MACH_LITO_WINGLM_LAO_COM),y)
 DTS_TARGET := lito-winglm_lao_com
 endif
 
-ALL_DTS := $(notdir $(wildcard echo $(srctree)/$(src)/$(DTS_PROJECT)/$(DTS_TARGET)/*.dts))
+ALL_DTS := $(notdir $(wildcard $(srctree)/$(src)/$(DTS_PROJECT)/$(DTS_TARGET)/*.dts))
 dtbo-y += $(patsubst %.dts,%.dtbo,$(ALL_DTS))
 
 DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAMES))
