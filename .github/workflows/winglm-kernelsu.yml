@@ -46,18 +46,8 @@ jobs:
           bash /tmp/ksunext-setup.sh legacy
           KSU_SEPOLICY=drivers/kernelsu/selinux/sepolicy.c
           test -f "$KSU_SEPOLICY"
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("drivers/kernelsu/selinux/sepolicy.c")
-          s = p.read_text()
-          old = "#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)"
-          new = "#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)"
-          count = s.count(old)
-          if count < 3:
-              raise SystemExit(f"Expected at least 3 legacy avtab guards, found {count}")
-          p.write_text(s.replace(old, new))
-          print(f"Adjusted {count} avtab guards for Linux 4.19 flex_array layout")
-          PY
+          # KernelSU-Next legacy/sepolicy.c already selects flex_array for < 5.1,
+          # which is the correct compatibility path for this Linux 4.19 tree.
           curl -fL --retry 3 --retry-delay 2 \
             https://raw.githubusercontent.com/almwld/android_kernel_lge_sm7250/ksunext-winglm-ci/scripts/ci/patch-kernelsu-legacy.py \
             -o /tmp/patch-kernelsu-legacy.py
