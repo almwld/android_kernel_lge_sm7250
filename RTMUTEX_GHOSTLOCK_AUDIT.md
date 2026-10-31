@@ -54,3 +54,18 @@ The workflow file was inspected, but no successful Actions run or build artifact
 ## Explicit version distinction
 
 The requested stock baseline is reported as `4.19.157-perf+`, while the reviewed branch Makefile reports `4.19.325`. A valid stock-vs-branch comparison requires the exact stock source tree or a verifiable matching source commit. Renaming the release string does not recreate the stock source baseline.
+
+
+## Root build readiness (2026-11-01)
+
+The branch workflow is `.github/workflows/winglm-kernelsu.yml`. It is configured for push events on `ksunext-winglm-ci` and manual dispatch. The workflow builds `Image.gz`, collects the resulting config and logs, and uploads artifacts. It does not create a complete boot image or prove that the device bootloader will accept a flash operation.
+
+Rooting acceptance criteria:
+
+- CI completes with `CONFIG_KSU=y` and a non-empty `Image.gz`.
+- Device-specific boot image packaging and partition layout are verified against the exact LM-F100 firmware variant before any installation.
+- The bootloader state and supported flashing path are confirmed on-device.
+- A stock boot image and recovery path are retained. Do not flash a kernel-only artifact as if it were a boot image.
+- After boot, verify KernelSU manager connection and root authorization from the device; a successful compile alone is not root access.
+
+The RT-mutex lifetime fix remains unchanged. This build path is for KernelSU-Next integration and normal root access, not for reintroducing the GhostLock UAF.
